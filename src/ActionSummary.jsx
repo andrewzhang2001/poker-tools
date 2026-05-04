@@ -2,7 +2,7 @@ export default function ActionSummary({ actions, totalCombos }) {
   const totalFreq = actions.reduce((s, a) => s + a.total_frequency, 0)
 
   return (
-    <div style={{ marginTop: '12px' }}>
+    <div>
       {/* Action tiles */}
       <div style={{
         display: 'grid',

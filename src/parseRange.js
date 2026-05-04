@@ -84,24 +84,35 @@ export function getCellGradient(handName, handCounters, actions) {
   }
 
   const freqs = hand.actions_total_frequencies
-
   if (!freqs || Object.keys(freqs).length === 0) {
     return { background: ACTION_COLORS.FOLD }
   }
 
+  // total_frequency < 1 means only some combos of this hand are in range.
+  // Dark portion fills the top; action colors fill the bottom.
+  // Render actions largest-bet-first (Allin→Raise→Call→Fold) so aggressive
+  // actions appear at the top of the colored region, matching solver UIs.
+  const totalFreq = Math.min(1, hand.total_frequency)
+  const darkPct = (1 - totalFreq) * 100
+
   const stops = []
-  let pos = 0
+
+  if (darkPct > 0.05) {
+    stops.push(`#222 0% ${darkPct.toFixed(2)}%`)
+  }
+
+  let pos = darkPct
   for (const action of actions) {
-    const pct = (freqs[action.code] ?? 0) * 100
-    if (pct > 0) {
+    const pct = (freqs[action.code] ?? 0) * totalFreq * 100
+    if (pct > 0.001) {
       stops.push(`${action.color} ${pos.toFixed(2)}% ${(pos + pct).toFixed(2)}%`)
       pos += pct
     }
   }
 
-  if (stops.length === 0) return { background: ACTION_COLORS.FOLD }
+  if (stops.length === 0) return { background: '#222' }
   if (stops.length === 1) return { background: stops[0].split(' ')[0] }
-  // Force last stop to 100% to prevent rounding gaps showing through
+  // Extend last stop to 100% to prevent float rounding gaps
   const lastParts = stops[stops.length - 1].split(' ')
   stops[stops.length - 1] = `${lastParts[0]} ${lastParts[1]} 100%`
   return { background: `linear-gradient(to bottom, ${stops.join(', ')})` }

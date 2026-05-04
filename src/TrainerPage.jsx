@@ -1,16 +1,30 @@
 import { useState, useCallback, useRef } from 'react'
 
+const SUITS = ['♠', '♥', '♦', '♣']
+const RED_SUITS = new Set(['♥', '♦'])
+
+function pickSuits(handName) {
+  const isSuited = handName.endsWith('s')
+  if (isSuited) {
+    const suit = SUITS[Math.floor(Math.random() * 4)]
+    return [suit, suit]
+  }
+  // pairs and offsuit: two different suits
+  const shuffled = [...SUITS].sort(() => Math.random() - 0.5)
+  return [shuffled[0], shuffled[1]]
+}
+
 function pickHand(handCounters) {
-  // Only pick hands that are actually reachable at this node
+  // Weighted by actual combos in range (so Q7o with 12 combos is ~3x Q7s with 4)
   const entries = Object.entries(handCounters).filter(([, h]) => h.total_combos > 0)
-  const total = entries.reduce((s, [, h]) => s + h.total_combos_available, 0)
+  const total = entries.reduce((s, [, h]) => s + h.total_combos, 0)
   let r = Math.random() * total
   for (const [name, hand] of entries) {
-    r -= hand.total_combos_available
-    if (r <= 0) return { name, hand }
+    r -= hand.total_combos
+    if (r <= 0) return { name, hand, suits: pickSuits(name) }
   }
   const last = entries[entries.length - 1]
-  return { name: last[0], hand: last[1] }
+  return { name: last[0], hand: last[1], suits: pickSuits(last[0]) }
 }
 
 function calcScore(fractions, gtoFreqs, actions) {
@@ -20,8 +34,6 @@ function calcScore(fractions, gtoFreqs, actions) {
   return (1 - tv) * 100
 }
 
-// EV of a mixed strategy given per-action EVs.
-// Returns { gtoEV, userEV, evLoss }
 function calcEVs(fractions, gtoFreqs, actions, handEvs) {
   if (!handEvs) return null
   const gtoEV = actions.reduce((s, a) => s + (gtoFreqs[a.code] ?? 0) * (handEvs[a.code] ?? 0), 0)
@@ -47,6 +59,63 @@ function getCumul(fracs) {
   return fracs.reduce((acc, f) => [...acc, acc[acc.length - 1] + f], [0])
 }
 
+function formatSpotTitle(rangePath) {
+  const parts = rangePath.split('/')
+  const spotName = parts[parts.length - 1].replace(/_/g, ' ')
+  const hierarchy = parts.slice(0, -1).map(p => p.replace(/_/g, ' ')).join(' · ')
+  return { spotName, hierarchy }
+}
+
+function Card({ rank, suit }) {
+  const isRed = RED_SUITS.has(suit)
+  const color = isRed ? '#cc2200' : '#111'
+  return (
+    <div style={{
+      width: '88px',
+      height: '124px',
+      background: 'white',
+      borderRadius: '10px',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.7)',
+      position: 'relative',
+      color,
+      userSelect: 'none',
+      flexShrink: 0,
+    }}>
+      <div style={{ position: 'absolute', top: '7px', left: '9px', lineHeight: 1 }}>
+        <div style={{ fontSize: '19px', fontWeight: '800' }}>{rank}</div>
+        <div style={{ fontSize: '13px', marginTop: '1px' }}>{suit}</div>
+      </div>
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '38px',
+      }}>
+        {suit}
+      </div>
+      <div style={{
+        position: 'absolute', bottom: '7px', right: '9px', lineHeight: 1,
+        transform: 'rotate(180deg)',
+      }}>
+        <div style={{ fontSize: '19px', fontWeight: '800' }}>{rank}</div>
+        <div style={{ fontSize: '13px', marginTop: '1px' }}>{suit}</div>
+      </div>
+    </div>
+  )
+}
+
+function CardDisplay({ handName, suits }) {
+  const isPair = handName.length === 2
+  const r1 = handName[0]
+  const r2 = isPair ? handName[1] : handName[1]
+  const [s1, s2] = suits
+  return (
+    <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+      <Card rank={r1} suit={s1} />
+      <Card rank={r2} suit={s2} />
+    </div>
+  )
+}
+
 function PartitionBar({ actions, fractions, onChange, frozen = false, label }) {
   const barRef = useRef(null)
   const fractionsRef = useRef(fractions)
@@ -65,13 +134,11 @@ function PartitionBar({ actions, fractions, onChange, frozen = false, label }) {
       const frac = fractionsRef.current
       const cumul = getCumul(frac)
 
-      // Resolve which divider to use on first significant movement
       if (activeIdx === null) {
         const delta = clientX - startClientX
         if (Math.abs(delta) < 3) return
         const goingRight = delta > 0
 
-        // Find the divider position closest to where user clicked
         const positions = frac.slice(0, -1).map((_, i) => cumul[i + 1])
         let nearestPos = positions[0]
         let nearestDist = Infinity
@@ -80,25 +147,19 @@ function PartitionBar({ actions, fractions, onChange, frozen = false, label }) {
           if (dist < nearestDist) { nearestDist = dist; nearestPos = pos }
         })
 
-        // Collect all dividers at that position (handles 0%-width segments)
         const tied = positions
           .map((pos, i) => ({ i, pos }))
           .filter(({ pos }) => Math.abs(pos - nearestPos) < 1e-9)
 
         if (goingRight) {
-          // Need a divider whose RIGHT segment can shrink (fractions[i+1] > 0)
-          // i.e. cumul[i+2] > cumul[i+1]. Pick rightmost qualifying one.
           const ok = [...tied].reverse().find(({ i }) => cumul[i + 2] > cumul[i + 1])
           activeIdx = (ok ?? tied[tied.length - 1]).i
         } else {
-          // Need a divider whose LEFT segment can shrink (fractions[i] > 0)
-          // i.e. cumul[i+1] > cumul[i]. Pick leftmost qualifying one.
           const ok = tied.find(({ i }) => cumul[i + 1] > cumul[i])
           activeIdx = (ok ?? tied[0]).i
         }
       }
 
-      // Move the resolved divider
       const frac2 = fractionsRef.current
       const cumul2 = getCumul(frac2)
       const barRect = barRef.current.getBoundingClientRect()
@@ -111,7 +172,6 @@ function PartitionBar({ actions, fractions, onChange, frozen = false, label }) {
       next[activeIdx] = newPos - cumul2[activeIdx]
       next[activeIdx + 1] = cumul2[activeIdx + 2] - newPos
 
-      // Normalize to prevent float drift and clamp negatives
       const sum = next.reduce((s, f) => s + f, 0)
       onChange(next.map(f => Math.max(0, f) / sum))
     }
@@ -195,7 +255,6 @@ function PartitionBar({ actions, fractions, onChange, frozen = false, label }) {
           )
         })}
 
-        {/* Divider handles — visual only, drag is handled by the whole bar */}
         {!frozen && actions.slice(0, -1).map((_, i) => {
           const pos = cumul[i + 1] * 100
           return (
@@ -220,15 +279,16 @@ function PartitionBar({ actions, fractions, onChange, frozen = false, label }) {
   )
 }
 
-export default function TrainerPage({ rangeData, onBack }) {
+export default function TrainerPage({ rangeData, rangePath, onBack }) {
   const { actions, handCounters, handEvs } = rangeData
+  const { spotName, hierarchy } = formatSpotTitle(rangePath)
 
   const evenSplit = () => actions.map(() => 1 / actions.length)
 
   const [current, setCurrent] = useState(() => pickHand(handCounters))
   const [fractions, setFractions] = useState(evenSplit)
   const [submitted, setSubmitted] = useState(false)
-  const [result, setResult] = useState(null)  // { score, evLoss, gtoEV, userEV }
+  const [result, setResult] = useState(null)
   const [session, setSession] = useState({ scoreTotal: 0, evLossTotal: 0, count: 0 })
 
   const gtoFreqs = current.hand.actions_total_frequencies ?? {}
@@ -254,6 +314,10 @@ export default function TrainerPage({ rangeData, onBack }) {
     setResult(null)
   }, [handCounters])
 
+  const setAllTo = useCallback((actionIdx) => {
+    setFractions(actions.map((_, i) => i === actionIdx ? 1 : 0))
+  }, [actions])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       {/* Header */}
@@ -271,7 +335,12 @@ export default function TrainerPage({ rangeData, onBack }) {
         >
           ← Back
         </button>
-        <span style={{ fontSize: '15px', fontWeight: '600', color: '#ddd' }}>Trainer</span>
+        <div>
+          <div style={{ fontSize: '15px', fontWeight: '700', color: '#ddd' }}>{spotName}</div>
+          {hierarchy && (
+            <div style={{ fontSize: '11px', color: '#555', marginTop: '1px' }}>{hierarchy}</div>
+          )}
+        </div>
         {session.count > 0 && (
           <span style={{ marginLeft: 'auto', fontSize: '13px', color: '#888', display: 'flex', gap: '16px' }}>
             <span>
@@ -297,15 +366,49 @@ export default function TrainerPage({ rangeData, onBack }) {
       <div style={{ flex: 1, overflow: 'auto', display: 'flex', justifyContent: 'center', padding: '40px 20px' }}>
         <div style={{ width: '100%', maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-          {/* Hand */}
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '80px', fontWeight: '800', color: 'white', letterSpacing: '-3px', lineHeight: 1 }}>
-              {current.name}
-            </div>
-            <div style={{ fontSize: '12px', color: '#555', marginTop: '6px' }}>
-              {current.hand.total_combos_available} combos
+          {/* Cards + hand info */}
+          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '14px', alignItems: 'center' }}>
+            <CardDisplay handName={current.name} suits={current.suits} />
+            <div>
+              <div style={{ fontSize: '28px', fontWeight: '800', color: '#aaa', letterSpacing: '-1px', lineHeight: 1 }}>
+                {current.name}
+              </div>
+              <div style={{ fontSize: '12px', color: '#555', marginTop: '4px' }}>
+                {current.hand.total_combos.toFixed(2)} / {current.hand.total_combos_available} combos
+                {current.hand.total_frequency < 0.999 && (
+                  <span style={{ color: '#666', marginLeft: '6px' }}>
+                    ({(current.hand.total_frequency * 100).toFixed(1)}% of range)
+                  </span>
+                )}
+              </div>
             </div>
           </div>
+
+          {/* Quick action buttons */}
+          {!submitted && (
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {actions.map((action, i) => (
+                <button
+                  key={action.code}
+                  onClick={() => setAllTo(i)}
+                  style={{
+                    flex: 1,
+                    padding: '7px 0',
+                    background: action.color,
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: 'white',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    opacity: 0.85,
+                  }}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* User's bar */}
           <PartitionBar
@@ -316,7 +419,7 @@ export default function TrainerPage({ rangeData, onBack }) {
             label={submitted ? 'YOUR ANSWER' : undefined}
           />
 
-          {/* GTO bar — shown after submit */}
+          {/* GTO bar */}
           {submitted && (
             <PartitionBar
               actions={actions}
@@ -327,7 +430,7 @@ export default function TrainerPage({ rangeData, onBack }) {
             />
           )}
 
-          {/* Score + EV loss — shown after submit */}
+          {/* Score + EV loss */}
           {submitted && result && (
             <div style={{
               display: 'grid',
