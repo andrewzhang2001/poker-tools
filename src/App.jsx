@@ -302,6 +302,10 @@ export default function App() {
           hoveredHand={hoveredHand}
           handCounters={rangeData1.handCounters}
           actions={rangeData1.actions}
+          handCounters2={isCompare ? rangeData2?.handCounters : undefined}
+          actions2={isCompare ? rangeData2?.actions : undefined}
+          label1={isCompare ? rangePath1.split('/').pop().replace(/_/g, ' ') : undefined}
+          label2={isCompare ? rangePath2?.split('/').pop().replace(/_/g, ' ') : undefined}
         />
       )}
 
