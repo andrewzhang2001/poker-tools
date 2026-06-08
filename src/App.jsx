@@ -44,12 +44,12 @@ function FileTree({ tree, onSelect, activeJsonKey, depth = 0 }) {
                 textOverflow: 'ellipsis',
               }}
             >
-              {key.replace('.json', '')}
+              {key.replace('.json', '').replace(/_/g, ' ')}
             </div>
           )
         }
         return (
-          <details key={key} open>
+          <details key={key} open={key !== 'chip_ev'}>
             <summary style={{
               padding: '4px 8px',
               cursor: 'pointer',
@@ -62,7 +62,7 @@ function FileTree({ tree, onSelect, activeJsonKey, depth = 0 }) {
               alignItems: 'center',
               gap: '4px',
             }}>
-              <span style={{ opacity: 0.5 }}>▶</span> {key}
+              <span style={{ opacity: 0.5 }}>▶</span> {key.replace(/_/g, ' ')}
             </summary>
             <FileTree tree={value} onSelect={onSelect} activeJsonKey={activeJsonKey} depth={depth + 1} />
           </details>
@@ -121,6 +121,13 @@ export default function App() {
   const jsonKey2 = rangePath2 ? `/ranges/${rangePath2}.json` : null
 
   const fileTree = buildFileTree(Object.keys(rangeFiles))
+
+  useEffect(() => {
+    if (!rawPath) {
+      const first25NL = Object.keys(rangeFiles).filter(k => k.startsWith('/ranges/25NL/')).sort()[0]
+      if (first25NL) navigate('/' + first25NL.replace('/ranges/', '').replace('.json', ''), { replace: true })
+    }
+  }, [])
 
   useEffect(() => {
     if (!jsonKey1 || !rangeFiles[jsonKey1]) { setRangeData1(null); return }
