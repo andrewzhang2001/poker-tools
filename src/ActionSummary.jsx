@@ -1,5 +1,8 @@
-export default function ActionSummary({ actions, totalCombos }) {
-  const totalFreq = actions.reduce((s, a) => s + a.total_frequency, 0)
+const DIMMED_OPACITY = 0.35
+
+// selectedActionCode dims every other action. onActionSelect makes the tiles clickable.
+export default function ActionSummary({ actions, selectedActionCode, onActionSelect }) {
+  const opacityFor = action => (selectedActionCode && action.code !== selectedActionCode ? DIMMED_OPACITY : 1)
 
   return (
     <div>
@@ -13,6 +16,7 @@ export default function ActionSummary({ actions, totalCombos }) {
         {actions.map(action => (
           <div
             key={action.code}
+            onClick={onActionSelect && (() => onActionSelect(action.code))}
             style={{
               background: action.color,
               borderRadius: '8px',
@@ -21,6 +25,9 @@ export default function ActionSummary({ actions, totalCombos }) {
               flexDirection: 'column',
               justifyContent: 'space-between',
               minHeight: '90px',
+              cursor: onActionSelect ? 'pointer' : 'default',
+              opacity: opacityFor(action),
+              boxShadow: action.code === selectedActionCode ? 'inset 0 0 0 2px white' : 'none',
             }}
           >
             <div style={{ fontSize: '15px', fontWeight: '700', color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>
@@ -46,6 +53,7 @@ export default function ActionSummary({ actions, totalCombos }) {
             style={{
               flex: action.total_frequency,
               background: action.color,
+              opacity: opacityFor(action),
             }}
           />
         ))}

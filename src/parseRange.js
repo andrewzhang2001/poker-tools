@@ -1,5 +1,91 @@
 export const RANKS = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2']
 
+const COMBO_COUNT = 1326
+const SUIT_DISPLAY_ORDER = ['s', 'h', 'd', 'c']
+const SOLVER_DECK = [...RANKS].reverse().flatMap(rank => ['c', 'd', 'h', 's'].map(suit => rank + suit))
+
+// Solver combo arrays list every 2-card combo of the deck 2c 2d 2h 2s 3c … As,
+// with the higher deck card j as the outer loop. Names put that higher card first (JsJh, AsQh).
+const SOLVER_COMBOS = SOLVER_DECK.flatMap((highCard, j) => SOLVER_DECK.slice(0, j).map(lowCard => highCard + lowCard))
+const SOLVER_COMBO_INDEX = new Map(SOLVER_COMBOS.map((cards, index) => [cards, index]))
+const SOLVER_COMBO_DECK_INDICES = SOLVER_DECK.flatMap((_, j) => SOLVER_DECK.slice(0, j).map((_, i) => [j, i]))
+
+// For each combo, the opponent's range weight on combos that share no card with it.
+function buildOpponentCompatibleWeights(opponentRange) {
+  const weightByCard = new Array(SOLVER_DECK.length).fill(0)
+  let totalWeight = 0
+  SOLVER_COMBO_DECK_INDICES.forEach(([highCard, lowCard], index) => {
+    weightByCard[highCard] += opponentRange[index]
+    weightByCard[lowCard] += opponentRange[index]
+    totalWeight += opponentRange[index]
+  })
+  return SOLVER_COMBO_DECK_INDICES.map(([highCard, lowCard], index) =>
+    totalWeight - weightByCard[highCard] - weightByCard[lowCard] + opponentRange[index]
+  )
+}
+
+// Returns the active player's 1326 combos in solver order, each with its weight, equity, EV,
+// per-action frequencies and EVs, and the opponent weight it can face (the solver's averaging weight).
+function buildActivePlayerCombos(data, activePlayer, opponent) {
+  const opponentWeights = buildOpponentCompatibleWeights(opponent.range)
+  return SOLVER_COMBOS.map((cards, index) => {
+    const freqs = {}
+    const actionEvs = {}
+    for (const sol of data.action_solutions) {
+      freqs[sol.action.code] = sol.strategy[index]
+      actionEvs[sol.action.code] = sol.evs[index]
+    }
+    return {
+      cards,
+      weight: activePlayer.range[index],
+      equity: activePlayer.hand_eqs[index],
+      ev: activePlayer.hand_evs[index],
+      freqs,
+      actionEvs,
+      opponentWeight: opponentWeights[index],
+    }
+  })
+}
+
+function buildEquityRange(activePlayer, combos) {
+  return {
+    position: activePlayer.player.position,
+    relativePosition: activePlayer.relative_postflop_position,
+    totalCombos: activePlayer.total_combos,
+    totalEquity: activePlayer.total_eq,
+    combos: combos.filter(combo => combo.weight > 0),
+  }
+}
+
+function suitPairsForHand(handName) {
+  const isPair = handName.length === 2
+  const isSuited = handName.endsWith('s')
+  if (isPair) return SUIT_DISPLAY_ORDER.flatMap((s1, i) => SUIT_DISPLAY_ORDER.slice(i + 1).map(s2 => [s1, s2]))
+  if (isSuited) return SUIT_DISPLAY_ORDER.map(suit => [suit, suit])
+  return SUIT_DISPLAY_ORDER.flatMap(s1 => SUIT_DISPLAY_ORDER.filter(s2 => s2 !== s1).map(s2 => [s1, s2]))
+}
+
+// Returns handName -> [{ cards, blocked, weight, equity, ev, freqs }], one entry per suit combo.
+function buildComboBreakdown(data, combos) {
+  const boardCards = data.game.board.match(/../g) ?? []
+  const breakdown = {}
+  for (let row = 0; row < 13; row++) {
+    for (let col = 0; col < 13; col++) {
+      const handName = getHandName(row, col)
+      const [highRank, lowRank] = handName
+      breakdown[handName] = suitPairsForHand(handName).map(([highSuit, lowSuit]) => {
+        const card1 = highRank + highSuit
+        const card2 = lowRank + lowSuit
+        return {
+          ...combos[SOLVER_COMBO_INDEX.get(card1 + card2)],
+          blocked: boardCards.includes(card1) || boardCards.includes(card2),
+        }
+      })
+    }
+  }
+  return breakdown
+}
+
 export function getHandName(row, col) {
   if (row === col) return RANKS[row] + RANKS[col]
   if (row < col) return RANKS[row] + RANKS[col] + 's'
@@ -21,6 +107,26 @@ export function getActionColor(action) {
   return '#757575'
 }
 
+export const POSTFLOP_ACTION_COLORS = {
+  CHECK: '#43A047',
+  BET_UNDER_45: '#F57C00',
+  BET_45_TO_90: '#D32F2F',
+  BET_90_PLUS: '#8E24AA',
+  ALLIN: '#1A237E',
+}
+
+// Bets and raises are colored by size as a fraction of the pot.
+export function getPostflopActionColor(action) {
+  if (action.type === 'FOLD') return ACTION_COLORS.FOLD
+  if (action.type === 'CALL') return ACTION_COLORS.CALL
+  if (action.type === 'CHECK') return POSTFLOP_ACTION_COLORS.CHECK
+  if (action.allin) return POSTFLOP_ACTION_COLORS.ALLIN
+  const potFraction = parseFloat(action.betsize_by_pot)
+  if (potFraction < 0.45) return POSTFLOP_ACTION_COLORS.BET_UNDER_45
+  if (potFraction < 0.9) return POSTFLOP_ACTION_COLORS.BET_45_TO_90
+  return POSTFLOP_ACTION_COLORS.BET_90_PLUS
+}
+
 export function formatActionLabel(action) {
   if (action.type === 'FOLD') return 'Fold'
   if (action.type === 'CALL') return `Call ${action.betsize}`
@@ -37,6 +143,9 @@ export function parseRange(data) {
     )
   ) ?? data.players_info[1]
 
+  const isPreflop = data.game.current_street.type === 'PREFLOP'
+  const colorForAction = isPreflop ? getActionColor : getPostflopActionColor
+
   const actions = data.action_solutions.map(sol => ({
     code: sol.action.code,
     type: sol.action.type,
@@ -45,7 +154,7 @@ export function parseRange(data) {
     allin: sol.action.allin,
     total_frequency: sol.total_frequency,
     total_combos: sol.total_combos,
-    color: getActionColor(sol.action),
+    color: colorForAction(sol.action),
     label: formatActionLabel(sol.action),
   }))
 
@@ -61,12 +170,18 @@ export function parseRange(data) {
     }
   }
 
+  const hasComboData = activePlayer.range.length === COMBO_COUNT
+  const opponent = data.players_info.find(player => player !== activePlayer)
+  const combos = hasComboData ? buildActivePlayerCombos(data, activePlayer, opponent) : null
+
   return {
     actions,
     handCounters: activePlayer.simple_hand_counters,
     totalCombos: activePlayer.total_combos,
     game: data.game,
     handEvs,
+    comboBreakdown: hasComboData ? buildComboBreakdown(data, combos) : null,
+    equityRange: hasComboData ? buildEquityRange(activePlayer, combos) : null,
   }
 }
 
@@ -88,12 +203,24 @@ export function getCellGradient(handName, handCounters, actions) {
     return { background: ACTION_COLORS.FOLD }
   }
 
-  // total_frequency < 1 means only some combos of this hand are in range.
-  // Dark portion fills the top; action colors fill the bottom.
-  // Render actions largest-bet-first (Allin→Raise→Call→Fold) so aggressive
-  // actions appear at the top of the colored region, matching solver UIs.
-  const totalFreq = Math.min(1, hand.total_frequency)
-  const darkPct = (1 - totalFreq) * 100
+  return getActionGradient(Math.min(1, hand.total_frequency), freqs, actions)
+}
+
+export function getComboGradient(combo, actions) {
+  return getActionGradient(combo.weight, combo.freqs, actions)
+}
+
+// Full-width action mix, colors laid out left to right.
+export function getHorizontalActionGradient(freqs, actions) {
+  return getActionGradient(1, freqs, actions, 'to right')
+}
+
+// inRangeFraction < 1 means the hand is only partly in range.
+// Dark portion fills the start; action colors fill the rest.
+// Render actions largest-bet-first (Allin→Raise→Call→Fold) so aggressive
+// actions appear at the start of the colored region, matching solver UIs.
+function getActionGradient(inRangeFraction, freqs, actions, direction = 'to bottom') {
+  const darkPct = (1 - inRangeFraction) * 100
 
   const stops = []
 
@@ -103,7 +230,7 @@ export function getCellGradient(handName, handCounters, actions) {
 
   let pos = darkPct
   for (const action of actions) {
-    const pct = (freqs[action.code] ?? 0) * totalFreq * 100
+    const pct = (freqs[action.code] ?? 0) * inRangeFraction * 100
     if (pct > 0.001) {
       stops.push(`${action.color} ${pos.toFixed(2)}% ${(pos + pct).toFixed(2)}%`)
       pos += pct
@@ -115,5 +242,5 @@ export function getCellGradient(handName, handCounters, actions) {
   // Extend last stop to 100% to prevent float rounding gaps
   const lastParts = stops[stops.length - 1].split(' ')
   stops[stops.length - 1] = `${lastParts[0]} ${lastParts[1]} 100%`
-  return { background: `linear-gradient(to bottom, ${stops.join(', ')})` }
+  return { background: `linear-gradient(${direction}, ${stops.join(', ')})` }
 }

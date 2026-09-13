@@ -1,6 +1,20 @@
-import { RANKS, getHandName, getCellGradient, isDeadHand } from './parseRange.js'
+import { RANKS, getHandName, getCellGradient, getComboGradient, isDeadHand } from './parseRange.js'
 
-export default function RangeGrid({ handCounters, actions, onCellHover, hoveredHand }) {
+// One vertical bar per suit combo; combos blocked by the board stay empty.
+function ComboBars({ combos, actions }) {
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', gap: '1px' }}>
+      {combos.map(combo => (
+        <div
+          key={combo.cards}
+          style={{ flex: 1, ...(combo.blocked ? {} : getComboGradient(combo, actions)) }}
+        />
+      ))}
+    </div>
+  )
+}
+
+export default function RangeGrid({ handCounters, actions, comboBreakdown, onCellHover, hoveredHand }) {
   return (
     <div style={{
       display: 'grid',
@@ -14,7 +28,8 @@ export default function RangeGrid({ handCounters, actions, onCellHover, hoveredH
         Array.from({ length: 13 }, (_, col) => {
           const hand = getHandName(row, col)
           const dead = isDeadHand(hand, handCounters)
-          const bgStyle = getCellGradient(hand, handCounters, actions)
+          const combos = comboBreakdown?.[hand]
+          const bgStyle = combos ? {} : getCellGradient(hand, handCounters, actions)
           const isHovered = hoveredHand === hand
 
           return (
@@ -36,7 +51,9 @@ export default function RangeGrid({ handCounters, actions, onCellHover, hoveredH
                 minHeight: 0,
               }}
             >
+              {combos && <ComboBars combos={combos} actions={actions} />}
               <span style={{
+                position: 'relative',
                 fontSize: 'clamp(8px, 1vw, 13px)',
                 fontWeight: '600',
                 color: dead ? '#444' : 'white',

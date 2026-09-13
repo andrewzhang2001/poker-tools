@@ -112,10 +112,10 @@ function renderBlock(rangeData, title, noteCount, extraClass = '') {
 }
 
 const RANGES = [
-  { file: 'ranges/chip_ev/mtt_ante/20bb/SB_vs_BU_2.json',   title: '20bb — SB vs BU 2bb open',   notes: 5 },
-  { file: 'ranges/chip_ev/mtt_ante/30bb/SB_vs_BU_2.json',   title: '30bb — SB vs BU 2bb open',   notes: 5 },
-  { file: 'ranges/chip_ev/mtt_ante/50bb/SB_vs_BU_2.1.json', title: '50bb — SB vs BU 2.1bb open', notes: 6 },
-  { file: 'ranges/chip_ev/mtt_ante/70bb/SB_vs_BU_2.2.json', title: '70bb — SB vs BU 2.2bb open', notes: 6 },
+  { file: 'ranges/preflop/mtt/chip_ev/mtt_ante/20bb/SB_vs_BU_2.json',   title: '20bb — SB vs BU 2bb open',   notes: 5 },
+  { file: 'ranges/preflop/mtt/chip_ev/mtt_ante/30bb/SB_vs_BU_2.json',   title: '30bb — SB vs BU 2bb open',   notes: 5 },
+  { file: 'ranges/preflop/mtt/chip_ev/mtt_ante/50bb/SB_vs_BU_2.1.json', title: '50bb — SB vs BU 2.1bb open', notes: 6 },
+  { file: 'ranges/preflop/mtt/chip_ev/mtt_ante/70bb/SB_vs_BU_2.2.json', title: '70bb — SB vs BU 2.2bb open', notes: 6 },
 ]
 
 const renderedBlocks = RANGES.map(({ file, title, notes }) => {
