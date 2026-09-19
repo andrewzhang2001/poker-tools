@@ -14,6 +14,9 @@ import SpotHistory from './SpotHistory.jsx'
 
 const rangeFiles = import.meta.glob('/ranges/**/*.json')
 const COLLAPSED_FOLDERS = new Set(['preflop', 'mtt'])
+// Folders open on load down to the pot type (postflop > 4bp). Matchups and everything below start closed.
+const OPEN_DEPTH = 1
+const startsOpen = (name, depth) => depth <= OPEN_DEPTH && !COLLAPSED_FOLDERS.has(name)
 
 function buildFileTree(paths) {
   const tree = {}
@@ -39,7 +42,14 @@ function compareTreeEntries(entryA, entryB) {
   return compareSpotNames(entryName(entryA), entryName(entryB)) ?? 0
 }
 
-function FileTree({ tree, onSelect, activeJsonKey, depth = 0 }) {
+// Every folder path from the tree root down to the one holding this range.
+function ancestorFolderPaths(rangePath) {
+  const folders = rangePath.split('/').slice(0, -1)
+  return new Set(folders.map((_, index) => folders.slice(0, index + 1).join('/')))
+}
+
+// openPaths, when given, is the exact set of folder paths to open; otherwise startsOpen decides.
+function FileTree({ tree, onSelect, activeJsonKey, openPaths, depth = 0, parentPath = '' }) {
   return (
     <div style={{ paddingLeft: depth > 0 ? '14px' : 0 }}>
       {Object.entries(tree).sort(compareTreeEntries).map(([key, value]) => {
@@ -65,8 +75,9 @@ function FileTree({ tree, onSelect, activeJsonKey, depth = 0 }) {
             </div>
           )
         }
+        const folderPath = parentPath ? `${parentPath}/${key}` : key
         return (
-          <details key={key} open={!COLLAPSED_FOLDERS.has(key)}>
+          <details key={key} open={openPaths ? openPaths.has(folderPath) : startsOpen(key, depth)}>
             <summary style={{
               padding: '4px 8px',
               cursor: 'pointer',
@@ -81,7 +92,7 @@ function FileTree({ tree, onSelect, activeJsonKey, depth = 0 }) {
             }}>
               <span style={{ opacity: 0.5 }}>▶</span> {segmentLabel(key)}
             </summary>
-            <FileTree tree={value} onSelect={onSelect} activeJsonKey={activeJsonKey} depth={depth + 1} />
+            <FileTree tree={value} onSelect={onSelect} activeJsonKey={activeJsonKey} openPaths={openPaths} depth={depth + 1} parentPath={folderPath} />
           </details>
         )
       })}
@@ -144,6 +155,8 @@ export default function App() {
   const jsonKey2 = rangePath2 ? `/ranges/${rangePath2}.json` : null
 
   const fileTree = buildFileTree(Object.keys(rangeFiles))
+  // The compare picker opens straight to the folder the current range sits in, and nothing else.
+  const comparePickerOpenPaths = useMemo(() => ancestorFolderPaths(rangePath1), [rangePath1])
 
   useEffect(() => {
     if (!rawPath) {
@@ -418,7 +431,7 @@ export default function App() {
             <div style={{ fontSize: '11px', fontWeight: '700', color: '#555', letterSpacing: '0.1em', marginBottom: '12px' }}>
               PICK RANGE TO COMPARE
             </div>
-            <FileTree tree={fileTree} onSelect={handleCompareSelect} activeJsonKey={jsonKey2} />
+            <FileTree tree={fileTree} onSelect={handleCompareSelect} activeJsonKey={jsonKey2} openPaths={comparePickerOpenPaths} />
           </div>
         </div>
       )}
